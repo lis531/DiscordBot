@@ -1,7 +1,8 @@
 import discord
 from discord.ext import commands
 from youtubesearchpython import VideosSearch
-import yt_dlp as youtube_dl
+import yt_dlp
+import os
 
 BOT_TOKEN = "MTA4MjczOTkyNDAyMjg2MTg1Ng.Gtg1cD.QIgWEVho2SGOvH_-WEyL8-qPeFPvkCUVwudvQY"
 
@@ -10,46 +11,61 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 async def download_youtube_video(link):
-    ytdl_opts = {
+    for file in os.listdir("downloaded_songs"):
+        try:
+            os.remove(os.path.join("downloaded_songs", file))
+            print(f"Removed: {file}")
+        except Exception as e:
+            print(f"Failed to remove {file}: {e}")
+    if not link.startswith('https://www.youtube.com'):
+        link = await get_first_youtube_result(link)
+    
+    download_dir = "downloaded_songs"
+    
+    ydl_opts = {
         'format': 'bestaudio/best',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
-        'outtmpl': 'downloads/%(id)s.%(ext)s',
+        'outtmpl': f'{download_dir}/%(id)s.%(ext)s',
     }
-
-    with youtube_dl.YoutubeDL(ytdl_opts) as ydl:
-        info_dict = ydl.extract_info(link, download=True)
-        filename = ydl.prepare_filename(info_dict).replace('.webm', '.mp3')
-    return filename
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(link, download=True)
+            filename = f"{download_dir}/{info['id']}.mp3"
+            return filename
+    except Exception as e:
+        print(f"Download error: {e}")
+        return None
 
 # !help
 @bot.hybrid_command(
-    name='help',  
+    name='help',
     brief='Show all commands',
-    description='Show all commands available.'
+    description='Show all commands available'
 )
 async def help_command(ctx):
     embed = discord.Embed(title="Available Commands", color=discord.Color.blue())
     for command in bot.commands:
         if command.brief:
-            embed.add_field(name=f"!{command.name}", value=command.brief, inline=False)
+            embed.add_field(name=f"!{command.name}", value=command.description, inline=False)
     await ctx.send(embed=embed)
 
 # !ping
 @bot.hybrid_command(
     name='ping',
     brief='Check bot latency',
-    description='Check bot latency in milliseconds.',
+    description='Check bot latency in milliseconds',
 )
 async def ping(ctx):
     await ctx.send(str(round(bot.latency * 1000)) + "ms")
 
 async def get_first_youtube_result(query):
-    videosSearch = VideosSearch(query, limit=1)
-    result = videosSearch.result()
+    videos_search = VideosSearch(query, limit=1)
+    result = videos_search.result()
     if result['result']:
         return result['result'][0]['link']
     return None
@@ -59,7 +75,7 @@ async def get_first_youtube_result(query):
     name='play',
     aliases=['p'],
     brief='Play music from YouTube',
-    description='Plays music from YouTube.'
+    description='Plays music from YouTube'
 )
 async def play(ctx, *, query: str):
     if not query:
@@ -103,13 +119,41 @@ async def queue_add(ctx, *, query: str):
     description='Show the queue'
 )
 async def queue(ctx):
+    embed = discord.Embed(title="Queue", color=discord.Color.blue())
     if queueList:
-        embed = discord.Embed(title="Queue", color=discord.Color.blue())
         for i, link in enumerate(queueList):
-            embed.add_field(name=i+1, value=link, inline=False)
+            embed.add_field(name="", value=str(i+1) + ". " + link, inline=False)
         await ctx.send(embed=embed)
     else:
-        await ctx.send("Queue is empty.")
+        embed.add_field(name="", value="Queue is empty.", inline=False)
+        await ctx.send(embed=embed)
+
+# !seek <time>
+@bot.hybrid_command(
+    name='seek',
+    brief='Seek to a specific time',
+    description='Seek to a specific time'
+)
+async def seek(ctx, time: int):
+    vc = ctx.voice_client
+    vc.source = discord.PCMVolumeTransformer(vc.source)
+    vc.source.seek(time)
+
+# !skip
+@bot.hybrid_command(
+    name='skip',
+    brief='Skip the current song',
+    description='Skip the current song'
+)
+async def skip(ctx):
+    if queueList:
+        link = queueList.pop(0)
+        filename = await download_youtube_video(link)
+        vc = ctx.voice_client
+        vc.stop()
+        vc.play(discord.FFmpegPCMAudio(filename))
+        embed = discord.Embed(title="Skipped song", color=discord.Color.blue())
+        await ctx.send(embed=embed)
 
 # !yt <query>
 @bot.hybrid_command(
@@ -136,10 +180,12 @@ async def leave(ctx):
     if vc:
         vc.stop()
         await vc.disconnect()
+        embed = discord.Embed(title="Disconnected", color=discord.Color.blue())
+        await ctx.send(embed=embed)
 
 @bot.event
 async def is_queue():
-    if queueList:
+    if queueList and not vc.is_playing():
         link = queueList.pop(0)
         filename = await download_youtube_video(link)
         vc = bot.voice_clients[0]
