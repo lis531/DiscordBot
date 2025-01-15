@@ -10,7 +10,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
-queue_list = []
+queue_list = {}
 current_audio_file = None
 
 def create_embed(title, color, description=""):
@@ -67,65 +67,31 @@ async def get_first_youtube_result(query):
     result = videos_search.result()
     return result['result'][0]['link'] if result['result'] else None
 
-async def play_song(vc, link):
+async def play_song(vc, link, query = None, ctx = None):
     global current_audio_file
     current_audio_file = await download_youtube_video(link)
     if current_audio_file:
         vc.play(discord.FFmpegPCMAudio(current_audio_file), after=lambda e: bot.loop.create_task(play_next(vc)))
+        if ctx and query:
+            await ctx.send(embed=create_embed("Now Playing", discord.Color.green(), "**" + query + "**" + " " + link))
     else:
         print("Failed to download song.")
 
-# !play <query>
+# !force <query>
 @bot.hybrid_command(
     name='force',
     aliases=['f'],
     brief='Force play a song',
     description='Force play a song (replaces the current song if playing).'
 )
-async def force(ctx, *, query: str):
-    global is_playing
-    global current_audio_file
-    await ctx.defer()
+async def force(ctx, *, query: str, do_defer=True):
+    print("Forcing...")
+    if do_defer:
+        await ctx.defer()
 
     if not query:
         await ctx.send(embed=create_embed("Error", discord.Color.light_grey(), "No query provided."))
         return
-    if not ctx.author.voice.channel:
-        await ctx.send(embed=create_embed("Error", discord.Color.red(), "You are not connected to a voice channel."))
-        return
-
-    channel = ctx.author.voice.channel
-    current_audio_file = await download_youtube_video(query)
-
-    if not current_audio_file:
-        await ctx.send(embed=create_embed("Error", discord.Color.red(), "Failed to download the song."))
-        return
-
-    if ctx.voice_client:
-        vc = ctx.voice_client
-        if vc.is_playing():
-            vc.stop()
-        vc.play(discord.FFmpegPCMAudio(current_audio_file))
-    else:
-        if not ctx.voice_client:
-            vc = await channel.connect()
-        else:
-            vc = ctx.voice_client
-            if not vc.is_connected():
-                await vc.move_to(channel)
-        vc.play(discord.FFmpegPCMAudio(current_audio_file))
-    await ctx.send(embed=create_embed("Now Playing", discord.Color.green(), query))
-
-# !play <query>
-@bot.hybrid_command(
-    name='play',
-    aliases=['p'],
-    brief='Add a song to the queue',
-    description='Add a song to the queue'
-)
-async def play(ctx, *, query: str):
-    await ctx.defer()
-
     if not ctx.author.voice or not ctx.author.voice.channel:
         await ctx.send(embed=create_embed("Error", discord.Color.red(), "You are not connected to a voice channel."))
         return
@@ -139,14 +105,28 @@ async def play(ctx, *, query: str):
         if not vc.is_connected():
             await vc.move_to(channel)
 
+    vc.stop()
     link = await get_first_youtube_result(query)
-    if not vc.is_playing():
-        await play_song(vc, link)
-    if link:
-        queue_list.append(link)
-        await ctx.send(embed=create_embed("Added to Queue", discord.Color.yellow(), f"**{query}** has been added to the queue."))
+    await play_song(vc, link, query, ctx)
+
+# !play <query>
+@bot.hybrid_command(
+    name='play',
+    aliases=['p'],
+    brief='Add a song to the queue',
+    description='Add a song to the queue'
+)
+async def play(ctx, *, query: str):
+    await ctx.defer()
+    if ctx.voice_client is None or not ctx.voice_client.is_playing():
+        await force(ctx, query=query, do_defer=False)
     else:
-        await ctx.send(embed=create_embed("Error", discord.Color.red(), "No results found."))
+        link = await get_first_youtube_result(query)
+        if link:
+            queue_list[query] = link
+            await ctx.send(embed=create_embed("Added to Queue", discord.Color.yellow(), f"**{query}** has been added to the queue."))
+        else:
+            await ctx.send(embed=create_embed("Error", discord.Color.red(), "No results found."))
 
 # !queue
 @bot.hybrid_command(
@@ -156,7 +136,7 @@ async def play(ctx, *, query: str):
 )
 async def queue(ctx):
     embed = discord.Embed(title="Current Queue", color=discord.Color.blue())
-    embed.add_field(name="Queue is empty", value="Add songs to the queue with `/play <query>`.") if not queue_list else [embed.add_field(name="", value=str(i) + ". " + link, inline=False) for i, link in enumerate(queue_list, 1)]
+    embed.add_field(name="Queue is empty", value="Add songs to the queue with `/play <query>`.") if not queue_list else [embed.add_field(name="", value=str(i) + ". **" + query + "** " + link, inline=False) for i, (query, link) in enumerate(queue_list.items(), 1)]
     await ctx.send(embed=embed)
 
 current_audio_file = None
@@ -184,8 +164,8 @@ async def seek(ctx, time: int):
 
 async def play_next(vc):
     if queue_list:
-        print(queue_list)
-        next_link = queue_list.pop(0)
+        next_link = list(queue_list.values())[0]
+        queue_list.pop(list(queue_list.keys())[0])
         print(f"Playing next song: {next_link}")
         await play_song(vc, next_link)
     else:
@@ -200,13 +180,13 @@ async def play_next(vc):
     description='Skips the current song.'
 )
 async def skip(ctx):
-    await ctx.defer()
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
-        await play_next(ctx.voice_client)
         await ctx.send(embed=create_embed("Skipped", discord.Color.blue(), "Skipped to the next song."))
+        if queue_list:
+            await play_next(ctx.voice_client)
     else:
-        await ctx.send(embed=create_embed("Error", discord.Color.red(), "No song is currently playing."))
+        await ctx.send(embed=create_embed("Error", discord.Color.red(), "No song is currently playing."))        
 
 # !yt <query>
 @bot.hybrid_command(
