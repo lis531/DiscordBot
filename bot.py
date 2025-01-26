@@ -3,7 +3,8 @@ from discord.ext import commands
 from youtubesearchpython import VideosSearch
 import yt_dlp
 
-BOT_TOKEN = "MTA4MjczOTkyNDAyMjg2MTg1Ng.GFanPu.v3mZSJyaVu1cn0Uk3sGRZ6rWxK-isfygJL-s-E"
+file = open("token.txt", "r")
+BOT_TOKEN = file.read()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -84,7 +85,7 @@ async def play_next_with_error_handling(vc, ctx=None):
 async def help_command(ctx):
     embed = create_embed("Help", discord.Color.blue(), description="**List of all available commands:**")
     for command in bot.commands:
-        embed.add_field(name=f"!{command.name}{', ' + str(command.aliases) if command.aliases else ''}", value=command.description, inline=False)
+        embed.add_field(name=f'`/{command.name}`{f", `/{', /'.join(command.aliases)}`" if command.aliases else ""}', value=command.description, inline=False)
     await ctx.send(embed=embed)
 
 # !ping
@@ -258,12 +259,30 @@ async def leave(ctx):
         await ctx.send(embed=create_embed("Disconnected from the voice channel.", discord.Color.red()))
 
 # additional features
+@bot.hybrid_command(
+    name='throw',
+    aliases=['rzut'],
+    brief='Throw a user',
+    description='Throw a user'
+)
+async def throw(ctx, member: discord.Member, repeats: int = 1):
+    channel = bot.get_channel(1321581483093131406)
+    currentChannel = member.voice.channel
+    if repeats > 10 or ctx.author.name == "digel2123":
+        print(repeats)
+        await ctx.send("https://media.discordapp.net/attachments/1122900157260894209/1129071902875455488/attachment.gif?ex=67984ee6&is=6796fd66&hm=671181dbbf90b49d2b8e50e8801105383b39efbfcf2fbab02a8b817b49efd2df&")
+        return
+    for _ in range(repeats):
+        await member.move_to(channel)
+        await member.move_to(currentChannel)
+    await ctx.send(f"Threw {member.mention} {repeats} times.")
+
 jajco_count = 0
 @bot.event
 async def on_message(message):
     global jajco_count
     if bot.user.mentioned_in(message):
-        await message.channel.send("SHUT THE FUCK UP")
+        await message.channel.send("**SHUT THE FUCK UP :face_with_symbols_over_mouth:**")
     if "jajco" in message.content.lower():
         jajco_count += 1
         await message.channel.send(embed=create_embed("Ilość jajec", discord.Color.green(), str(jajco_count)))
