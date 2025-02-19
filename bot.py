@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-from youtubesearchpython import VideosSearch
 import yt_dlp
 
 file = open("token.txt", "r")
@@ -19,34 +18,20 @@ current_stream_url = None
 def create_embed(title, color, description=""):
     return discord.Embed(title=title, description=description, color=color)
 
-async def get_first_youtube_result(query):
-    videos_search = VideosSearch(query, limit=1)
-    result = videos_search.result()
-    return result['result'][0]['link'] if result['result'] else None
-
-async def get_youtube_stream_url(link):
+async def get_youtube_url(query):
     ydl_opts = {
         'format': 'bestaudio/best',
         'noplaylist': True,
         'quiet': True
     }
-    try:
-        if not link.startswith('https://www.youtube.com'):
-            link = await get_first_youtube_result(link)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(link, download=False)
-            return info['url']
-    except Exception as e:
-        print(f"Error retrieving URL: {e}")
-        return None
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(f"ytsearch:{query}", download=False)
+        return (f"https://www.youtube.com/watch?v={info['entries'][0]['id']}", info['entries'][0]['url'], info['entries'][0]['title']) if 'entries' in info and info['entries'] else (None, None, None)
 
-async def play_song(vc, link, query=None, ctx=None):
-    global current_song
-    global is_skipping
-    global is_forced
-    global current_stream_url
+async def play_song(vc, query=None, ctx=None):
+    global current_song, is_skipping, current_stream_url
 
-    stream_url = await get_youtube_stream_url(link)
+    url, stream_url, title = await get_youtube_url(query)
     current_stream_url = stream_url
     if stream_url:
         ffmpeg_options = {
@@ -63,9 +48,9 @@ async def play_song(vc, link, query=None, ctx=None):
             if ctx:
                 await ctx.send(embed=create_embed("Error", discord.Color.red(), str(ex)))
         if ctx:
-            await ctx.send(embed=create_embed("Now Playing", discord.Color.green(), "**" + (query if query != link else "") + "**" + " " + link) if not is_skipping else create_embed("Skipped to", discord.Color.orange(), "**" + (query if query != link else "") + "**" + " " + link))
+            await ctx.send(embed=create_embed("Now Playing", discord.Color.green(), "**" + title + "**" + " " + url) if not is_skipping else create_embed("Skipped to", discord.Color.orange(), "**" + title + "**" + " " + url))
             is_skipping = False
-            current_song = f"**{query}** {link}"
+            current_song = f"**{title}** {url}"
     else:
         if ctx:
             await ctx.send(embed=create_embed("Error", discord.Color.red(), "Failed to retrieve stream URL."))
@@ -128,8 +113,7 @@ async def force(ctx, *, query: str, do_defer=True):
             await vc.move_to(channel)
 
     vc.stop()
-    link = await get_first_youtube_result(query)
-    await play_song(vc, link, query, ctx)
+    await play_song(vc, query, ctx)
 
 # !play <query>
 @bot.hybrid_command(
@@ -143,10 +127,10 @@ async def play(ctx, *, query: str):
     if ctx.voice_client is None or not ctx.voice_client.is_playing():
         await force(ctx, query=query, do_defer=False)
     else:
-        link = await get_first_youtube_result(query)
-        if link:
-            queue_list[query] = link
-            await ctx.send(embed=create_embed("Added to Queue", discord.Color.yellow(), f"**{query}** has been added to the queue."))
+        url, _, title = await get_youtube_url(query)
+        if url:
+            queue_list[query] = url
+            await ctx.send(embed=create_embed("Added to Queue", discord.Color.yellow(), f"**{title}** has been added to the queue."))
         else:
             await ctx.send(embed=create_embed("Error", discord.Color.red(), "No results found."))
 
@@ -199,15 +183,13 @@ async def seek(ctx, time: int):
         await ctx.send(embed=create_embed("Error", discord.Color.red(), "No current stream URL available."))
 
 async def play_next(vc, ctx=None):
-    global is_forced
-    global current_song
-
+    global is_forced, current_song
     if is_forced:
         return
 
     if queue_list:
-        query, link = queue_list.popitem()
-        await play_song(vc, link, query, ctx)
+        query, _ = queue_list.popitem()
+        await play_song(vc, query, ctx)
     else:
         current_song = None
 
@@ -238,7 +220,7 @@ async def skip(ctx):
     description='Search YouTube for a video'
 )
 async def yt(ctx, *, query: str):
-    link = await get_first_youtube_result(query)
+    _, link, _ = await get_youtube_url(query)
     if link:
         await ctx.send(link)
     else:
