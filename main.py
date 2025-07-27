@@ -1,9 +1,11 @@
+import os
 import discord
 from discord.ext import commands
 import yt_dlp
+from dotenv import load_dotenv
+load_dotenv()
 
-file = open("token.txt", "r")
-BOT_TOKEN = file.read()
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -280,4 +282,4 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
-bot.run(BOT_TOKEN)
+bot.run(DISCORD_TOKEN)
